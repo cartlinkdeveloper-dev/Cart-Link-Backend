@@ -360,3 +360,91 @@ exports.cancelProduct = async (req, res) => {
         });
     }
 };
+
+// Undo cancelled product quantity (restore)
+exports.undoCancelProduct = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { cancelledRecordId, productId, quantityToRestore, customerId } = req.body;
+
+        if (!productId && !cancelledRecordId) {
+            return res.status(400).json({ success: false, message: 'productId or cancelledRecordId is required' });
+        }
+
+        const order = await Order.findById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        if (!order.cancelledProducts || order.cancelledProducts.length === 0) {
+            return res.status(400).json({ success: false, message: 'No cancelled products to restore' });
+        }
+
+        // Find cancelled record by id or by productId (prefer id)
+        let cancelledIndex = -1;
+        if (cancelledRecordId) {
+            cancelledIndex = order.cancelledProducts.findIndex(c => c._id && c._id.toString() === cancelledRecordId.toString());
+        }
+        if (cancelledIndex === -1 && productId) {
+            // find the most recent cancelled entry for this product
+            for (let i = order.cancelledProducts.length - 1; i >= 0; i--) {
+                const c = order.cancelledProducts[i];
+                const pId = c.productId ? c.productId.toString() : (c.productId || '');
+                if (pId === productId) { cancelledIndex = i; break; }
+            }
+        }
+
+        if (cancelledIndex === -1) {
+            return res.status(404).json({ success: false, message: 'Cancelled record not found' });
+        }
+
+        const cancelledRecord = order.cancelledProducts[cancelledIndex];
+        const restoreQty = (quantityToRestore && quantityToRestore > 0) ? quantityToRestore : (cancelledRecord.quantity || 0);
+        if (!restoreQty || restoreQty <= 0) {
+            return res.status(400).json({ success: false, message: 'Invalid restore quantity' });
+        }
+
+        // Restore into order.products
+        const prodIndex = order.products.findIndex(p => p.productId && p.productId.toString() === (cancelledRecord.productId ? cancelledRecord.productId.toString() : productId));
+        if (prodIndex === -1) {
+            // Add product back
+            order.products.push({
+                productId: cancelledRecord.productId || productId,
+                productName: cancelledRecord.productName || '',
+                quantity: restoreQty,
+                price: cancelledRecord.price || 0,
+                mrp: cancelledRecord.mrp || cancelledRecord.price || 0,
+            });
+        } else {
+            order.products[prodIndex].quantity = (order.products[prodIndex].quantity || 0) + restoreQty;
+        }
+
+        // Decrease or remove cancelled record
+        if (restoreQty >= (cancelledRecord.quantity || 0)) {
+            // remove record
+            order.cancelledProducts.splice(cancelledIndex, 1);
+        } else {
+            order.cancelledProducts[cancelledIndex].quantity = (cancelledRecord.quantity || 0) - restoreQty;
+        }
+
+        // Recalculate total amount
+        let newTotal = 0;
+        order.products.forEach(p => { newTotal += (p.price * p.quantity); });
+        order.totalAmount = newTotal;
+
+        order.updatedAt = new Date();
+
+        const updatedOrder = await order.save();
+
+        await updatedOrder.populate('customerId', 'customerName name email mobile phone');
+        await updatedOrder.populate('shopId', 'shopName name contact phone mobile');
+        await updatedOrder.populate('products.productId', 'name price mrp');
+        await updatedOrder.populate('cancelledProducts.productId', 'name price mrp');
+
+        return res.status(200).json({ success: true, message: 'Cancelled product restored', data: updatedOrder });
+
+    } catch (error) {
+        console.error('Error undoing cancelled product:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Error undoing cancelled product' });
+    }
+};

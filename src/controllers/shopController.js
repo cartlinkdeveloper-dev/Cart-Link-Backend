@@ -11,6 +11,36 @@ exports.getAllShops = async (req, res) => {
     }
 };
 
+exports.searchShops = async (req, res) => {
+    try {
+        const { q } = req.query;
+
+        if (!q || q.trim().length === 0) {
+            return res.json({ success: true, data: [] });
+        }
+
+        // Search in shop name, address, and description using regex for case-insensitive search
+        const searchQuery = {
+            $or: [
+                { shopName: { $regex: q, $options: 'i' } },
+                { shopAddress: { $regex: q, $options: 'i' } },
+                { description: { $regex: q, $options: 'i' } }
+            ]
+        };
+
+        const shops = await Shop.find(searchQuery)
+            // ensure _id is present for navigation / detail fetches
+            .select('_id shopName shopAddress shopImage description followers')
+            .limit(50)
+            .lean();
+
+        return res.json({ success: true, data: shops });
+    } catch (err) {
+        console.error('searchShops error:', err);
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
 exports.getShopById = async (req, res) => {
     try {
         const shop = await Shop.findById(req.params.id).lean();

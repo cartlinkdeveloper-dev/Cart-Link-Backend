@@ -72,6 +72,11 @@ exports.register = async (req, res) => {
 
         const token = signToken(owner);
 
+        // Store user session
+        req.session.userId = owner._id;
+        req.session.userType = 'shop';
+        req.session.shopName = owner.shopName;
+
         res.status(201).json({
             success: true,
             message: 'Shop registered successfully',
@@ -128,6 +133,11 @@ exports.verifyCredentials = async (req, res) => {
 
         // Generate token
         const token = signToken(owner);
+
+        // Store user session
+        req.session.userId = owner._id;
+        req.session.userType = 'shop';
+        req.session.shopName = owner.shopName;
 
         res.json({
             success: true,
@@ -221,6 +231,33 @@ exports.checkEmailExists = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Server error'
+        });
+    }
+};
+
+// Logout endpoint
+exports.logout = async (req, res) => {
+    try {
+        req.session.destroy((err) => {
+            if (err) {
+                console.error('Session destroy error:', err);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to logout'
+                });
+            }
+
+            res.clearCookie('connect.sid');
+            res.json({
+                success: true,
+                message: 'Logged out successfully'
+            });
+        });
+    } catch (e) {
+        console.error('Logout error:', e);
+        res.status(500).json({
+            success: false,
+            message: 'Server error during logout'
         });
     }
 };
