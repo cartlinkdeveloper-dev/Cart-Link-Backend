@@ -20,6 +20,9 @@ router.patch('/:orderId/status', orderController.updateStatus);
 // Cancel product from order by quantity
 router.post('/:orderId/cancel-product', orderController.cancelProduct);
 
+// Undo cancellation of a product (restore quantity)
+router.post('/:orderId/undo-cancel-product', orderController.undoCancelProduct);
+
 
 // Verify OTP and mark order as delivered
 router.patch('/:orderId/verify-otp', orderController.verifyOtpAndDeliver);
