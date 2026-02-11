@@ -13,6 +13,15 @@ const ProductSchema = new mongoose.Schema({
   images: { type: [String], default: [] },
   isActive: { type: Boolean, default: true },
   isFeatured: { type: Boolean, default: false },
+  // Additional descriptive fields collected from the shop UI
+  color: { type: String },
+  size: { type: String },
+  material: { type: String },
+  weight: { type: String },
+  brand: { type: String },
+  length: { type: String },
+  width: { type: String },
+  height: { type: String },
   createdAt: { type: Date, default: Date.now }
 }, { collection: 'products' });
 

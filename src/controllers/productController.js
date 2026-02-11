@@ -3,7 +3,10 @@ const Product = require('../models/Product');
 
 exports.createProduct = async (req, res) => {
     try {
-        const { name, description, price, mrp, stock, inStock, sku, category, isActive, isFeatured, images, ownerId } = req.body;
+        // Debug: log full incoming payload to verify images are present
+        console.log('createProduct body:', req.body);
+        const { name, description, price, mrp, stock, inStock, sku, category, isActive, isFeatured, images, ownerId,
+            color, size, material, weight, brand, length, width, height } = req.body;
 
         if (!name || !description || price == null) {
             return res.status(400).json({ success: false, message: 'Missing required fields' });
@@ -11,6 +14,13 @@ exports.createProduct = async (req, res) => {
 
         // Determine boolean availability: prefer explicit inStock, else derive from numeric stock if provided, otherwise default true
         const availability = (inStock !== undefined) ? !!inStock : (stock !== undefined ? Number(stock) > 0 : true);
+
+        // Sanitize incoming images: ensure array of non-empty strings
+        let sanitizedImages = [];
+        if (Array.isArray(images)) {
+            sanitizedImages = images.map(i => (i == null ? '' : String(i).trim())).filter(Boolean);
+        }
+        console.log('createProduct received images:', sanitizedImages);
 
         const product = new Product({
             name,
@@ -25,7 +35,16 @@ exports.createProduct = async (req, res) => {
             ownerId: ownerId || null,
             isActive: !!isActive,
             isFeatured: !!isFeatured,
-            images: Array.isArray(images) ? images : [],
+            images: sanitizedImages,
+            // optional descriptive fields
+            color: color || undefined,
+            size: size || undefined,
+            material: material || undefined,
+            weight: weight || undefined,
+            brand: brand || undefined,
+            length: length || undefined,
+            width: width || undefined,
+            height: height || undefined,
         });
 
         await product.save();
@@ -75,8 +94,8 @@ exports.getAllProducts = async (req, res) => {
             filter.ownerId = ownerId;
         }
 
-        // Exclude images field to reduce payload size (images bloat response with base64)
-        const products = await Product.find(filter).select('-images').lean();
+        // Return full product documents (including images and descriptive fields)
+        const products = await Product.find(filter).lean();
         return res.json({ success: true, data: products });
     } catch (err) {
         console.error('getAllProducts error:', err);
@@ -133,7 +152,11 @@ exports.updateProduct = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid product ID' });
         }
 
-        const { name, description, price, mrp, stock, inStock, sku, category, isActive, isFeatured, images } = req.body;
+        // Debug: log full incoming payload for updates
+        console.log('updateProduct body:', req.body);
+
+        const { name, description, price, mrp, stock, inStock, sku, category, isActive, isFeatured, images,
+            color, size, material, weight, brand, length, width, height } = req.body;
 
         const update = {};
         if (name !== undefined) update.name = name;
@@ -146,7 +169,19 @@ exports.updateProduct = async (req, res) => {
         if (category !== undefined) update.category = category;
         if (isActive !== undefined) update.isActive = !!isActive;
         if (isFeatured !== undefined) update.isFeatured = !!isFeatured;
-        if (images !== undefined && Array.isArray(images)) update.images = images;
+        if (images !== undefined && Array.isArray(images)) {
+            const imgs = images.map(i => (i == null ? '' : String(i).trim())).filter(Boolean);
+            update.images = imgs;
+            console.log('updateProduct received images:', imgs);
+        }
+        if (color !== undefined) update.color = color;
+        if (size !== undefined) update.size = size;
+        if (material !== undefined) update.material = material;
+        if (weight !== undefined) update.weight = weight;
+        if (brand !== undefined) update.brand = brand;
+        if (length !== undefined) update.length = length;
+        if (width !== undefined) update.width = width;
+        if (height !== undefined) update.height = height;
 
         const updated = await Product.findByIdAndUpdate(id, update, { new: true });
         if (!updated) return res.status(404).json({ success: false, message: 'Product not found' });

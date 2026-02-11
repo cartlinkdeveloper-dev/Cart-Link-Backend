@@ -6,12 +6,15 @@ const uri = process.env.MONGODB_URI ||  'mongodb://cartLink_mongodb:CartLink123@
 mongoose.set('strictQuery', true);
 
 mongoose.connect(uri, {
-    autoIndex: true
+    autoIndex: true,
+    // fail-fast timeouts to surface network/DNS issues quickly during development
+    serverSelectionTimeoutMS: 10000,
+    connectTimeoutMS: 10000,
 })
     .then(() => console.log('✓ MongoDB connected'))
     .catch(err => {
         console.error('❌ MongoDB connection error:', err);
-        process.exit(1);
+        console.error('MongoDB connection failed — not exiting. Verify Atlas IP whitelist and credentials.');
     });
 
 module.exports = mongoose;

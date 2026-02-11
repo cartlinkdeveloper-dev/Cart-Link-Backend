@@ -13,6 +13,8 @@ exports.uploadImage = async (req, res) => {
             fetch_format: 'auto'
         });
 
+        console.log('Cloudinary upload result:', { url: result.secure_url, public_id: result.public_id });
+
         res.json({
             success: true,
             url: result.secure_url,
