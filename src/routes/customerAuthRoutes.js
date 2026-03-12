@@ -12,7 +12,7 @@ router.post('/logout', customerController.logout);
 router.get('/session', sessionMiddleware.getSessionInfo);
 
 // OTP endpoints
-router.post('/verify-otp', customerController.verifyCredentials);
+router.post('/verify-otp', customerController.verifyOTP);
 router.post('/resend-otp', customerController.resendOTP);
 
 // Forgot Password endpoints

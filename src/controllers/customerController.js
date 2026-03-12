@@ -735,3 +735,76 @@ exports.changePassword = async (req, res) => {
         });
     }
 };
+
+// Verify OTP
+exports.verifyOTP = async (req, res) => {
+    try {
+        const { customerId, otp } = req.body;
+
+        if (!customerId || !otp) {
+            return res.status(400).json({
+                success: false,
+                message: 'Customer ID and OTP are required'
+            });
+        }
+
+        const customer = await Customer.findById(customerId);
+
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                message: 'Customer not found'
+            });
+        }
+
+        if (!customer.otp || customer.otp !== otp) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid OTP'
+            });
+        }
+
+        if (!customer.otpExpiry || new Date() > customer.otpExpiry) {
+            return res.status(400).json({
+                success: false,
+                message: 'OTP has expired. Please request a new one.'
+            });
+        }
+
+        // Mark email as verified once OTP succeeds - use updateOne for faster response
+        const updatedCustomer = await Customer.findByIdAndUpdate(
+            customerId,
+            {
+                isEmailVerified: true,
+                $unset: { otp: 1, otpExpiry: 1 }
+            },
+            { new: true }
+        );
+
+        const token = signToken(updatedCustomer);
+
+        req.session.userId = updatedCustomer._id;
+        req.session.userType = 'customer';
+        req.session.customerName = updatedCustomer.customerName;
+
+        return res.json({
+            success: true,
+            message: 'OTP verified successfully. Login complete.',
+            token,
+            customer: {
+                _id: updatedCustomer._id,
+                customerName: updatedCustomer.customerName,
+                mobile: updatedCustomer.mobile,
+                email: updatedCustomer.email,
+                address: updatedCustomer.address,
+                isEmailVerified: updatedCustomer.isEmailVerified
+            }
+        });
+    } catch (e) {
+        console.error('Verify customer OTP error:', e);
+        return res.status(500).json({
+            success: false,
+            message: 'Server error during OTP verification'
+        });
+    }
+};
