@@ -73,21 +73,17 @@ exports.register = async (req, res) => {
         await customer.save();
         console.log('✓ New Customer registered (pending verification):', customerName);
 
-        // Send OTP email in background (non-blocking)
-        if (email) {
-            sendOTPEmail(email, otp, customerName)
-                .then(() => console.log('✓ OTP sent to:', email))
-                .catch(err => console.error('✗ Failed to send OTP email:', err.message));
-        }
-
+        // create customer with email already verified
+        const token = signToken(customer);
         res.status(201).json({
             success: true,
-            message: 'Customer registered. Please verify your email.',
-            requiresVerification: true,
+            message: 'Customer registered successfully.',
+            token,
             customer: {
                 _id: customer._id,
                 customerName: customer.customerName,
-                email: customer.email
+                email: customer.email,
+                mobile: customer.mobile
             }
         });
     } catch (e) {
@@ -133,37 +129,7 @@ exports.verifyCredentials = async (req, res) => {
             });
         }
 
-        // Generate OTP for every login (if email provided)
-        if (customer.email) {
-            const otp = generateOTP();
-            const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-            customer.otp = otp;
-            customer.otpExpiry = otpExpiry;
-            await customer.save();
-
-            console.log('🔐 OTP generated for customer login:', customer.customerName);
-
-            // Send OTP email in background (non-blocking)
-            sendOTPEmail(customer.email, otp, customer.customerName)
-                .then(() => console.log('✓ OTP sent to:', customer.email))
-                .catch(err => console.error('✗ Failed to send OTP email:', err.message));
-
-            // Return OTP required response
-            return res.status(403).json({
-                success: false,
-                message: 'OTP sent to your email. Please verify to complete login.',
-                requiresVerification: true,
-                customer: {
-                    _id: customer._id,
-                    customerName: customer.customerName,
-                    email: customer.email
-                }
-            });
-        }
-
-        // If no email, allow direct login
-        // Generate token
+        // Password OK – just log in, ignore OTP entirely
         const token = signToken(customer);
 
         // Store user session
@@ -574,25 +540,10 @@ exports.forgotPasswordVerify = async (req, res) => {
             });
         }
 
-        // Generate OTP
-        const otp = generateOTP();
-        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        // Save OTP to database
-        customer.otp = otp;
-        customer.otpExpiry = otpExpiry;
-        await customer.save();
-
-        // Send OTP email (non-blocking)
-        sendOTPEmail(email, otp, customer.customerName)
-            .then(() => console.log('✓ Forgot password OTP sent to:', email))
-            .catch(err => console.error('✗ Failed to send forgot password OTP:', err.message));
-
-        console.log('🔐 Forgot password OTP generated for:', customer.customerName);
-
+        // verification succeeded, no OTP needed
         res.json({
             success: true,
-            message: 'OTP sent to your email',
+            message: 'Verification successful. You may now reset your password.',
             customerId: customer._id,
             customerName: customer.customerName
         });
@@ -602,58 +553,6 @@ exports.forgotPasswordVerify = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Server error'
-        });
-    }
-};
-
-/**
- * Resend OTP for forgot password flow
- * POST /api/customer-auth/forgot-password/resend-otp
- */
-exports.forgotPasswordResendOTP = async (req, res) => {
-    try {
-        const { customerId } = req.body;
-
-        if (!customerId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Customer ID is required'
-            });
-        }
-
-        const customer = await Customer.findById(customerId);
-
-        if (!customer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Customer not found'
-            });
-        }
-
-        // Generate new OTP
-        const otp = generateOTP();
-        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        customer.otp = otp;
-        customer.otpExpiry = otpExpiry;
-        await customer.save();
-
-        // Send OTP email (non-blocking)
-        if (customer.email) {
-            sendOTPEmail(customer.email, otp, customer.customerName)
-                .then(() => console.log('✓ Forgot password OTP resent to:', customer.email))
-                .catch(err => console.error('✗ Failed to resend OTP:', err.message));
-        }
-
-        res.json({
-            success: true,
-            message: 'OTP sent successfully to your email'
-        });
-    } catch (error) {
-        console.error('Forgot password resend OTP error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error while resending OTP'
         });
     }
 };
@@ -736,75 +635,3 @@ exports.changePassword = async (req, res) => {
     }
 };
 
-// Verify OTP
-exports.verifyOTP = async (req, res) => {
-    try {
-        const { customerId, otp } = req.body;
-
-        if (!customerId || !otp) {
-            return res.status(400).json({
-                success: false,
-                message: 'Customer ID and OTP are required'
-            });
-        }
-
-        const customer = await Customer.findById(customerId);
-
-        if (!customer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Customer not found'
-            });
-        }
-
-        if (!customer.otp || customer.otp !== otp) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid OTP'
-            });
-        }
-
-        if (!customer.otpExpiry || new Date() > customer.otpExpiry) {
-            return res.status(400).json({
-                success: false,
-                message: 'OTP has expired. Please request a new one.'
-            });
-        }
-
-        // Mark email as verified once OTP succeeds - use updateOne for faster response
-        const updatedCustomer = await Customer.findByIdAndUpdate(
-            customerId,
-            {
-                isEmailVerified: true,
-                $unset: { otp: 1, otpExpiry: 1 }
-            },
-            { new: true }
-        );
-
-        const token = signToken(updatedCustomer);
-
-        req.session.userId = updatedCustomer._id;
-        req.session.userType = 'customer';
-        req.session.customerName = updatedCustomer.customerName;
-
-        return res.json({
-            success: true,
-            message: 'OTP verified successfully. Login complete.',
-            token,
-            customer: {
-                _id: updatedCustomer._id,
-                customerName: updatedCustomer.customerName,
-                mobile: updatedCustomer.mobile,
-                email: updatedCustomer.email,
-                address: updatedCustomer.address,
-                isEmailVerified: updatedCustomer.isEmailVerified
-            }
-        });
-    } catch (e) {
-        console.error('Verify customer OTP error:', e);
-        return res.status(500).json({
-            success: false,
-            message: 'Server error during OTP verification'
-        });
-    }
-};

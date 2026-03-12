@@ -1,15 +1,43 @@
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
-// Create transporter - using Gmail as example
-// For production, consider using services like SendGrid, AWS SES, etc.
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER || 'your-email@gmail.com',
-        pass: process.env.EMAIL_PASSWORD || 'your-app-password'
-    }
-});
+// Create transporter - using SendGrid API for better reliability on Render
+// SendGrid is recommended for production as it doesn't have network restrictions like direct SMTP
+let transporter;
+
+if (process.env.SENDGRID_API_KEY) {
+    // SendGrid via nodemailer (recommended for Render)
+    transporter = nodemailer.createTransport({
+        host: 'smtp.sendgrid.net',
+        port: 587,
+        auth: {
+            user: 'apikey',
+            pass: process.env.SENDGRID_API_KEY
+        }
+    });
+} else if (process.env.GMAIL_USE_OAUTH) {
+    // OAuth2 method for Gmail (more secure alternative)
+    transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: process.env.EMAIL_USER,
+            clientId: process.env.GMAIL_CLIENT_ID,
+            clientSecret: process.env.GMAIL_CLIENT_SECRET,
+            refreshToken: process.env.GMAIL_REFRESH_TOKEN
+        }
+    });
+} else {
+    // Fallback: Gmail with port 587 (TLS instead of SSL)
+    transporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false, // TLS instead of SSL
+        auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASSWORD
+        }
+    });
+}
 
 // Generate 6-digit OTP
 function generateOTP() {

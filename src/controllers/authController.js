@@ -79,11 +79,7 @@ exports.register = async (req, res) => {
             }
         }
 
-        // Generate OTP
-        const otp = generateOTP();
-        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        // Create new shop owner (not verified yet)
+        // Create new shop owner; email is considered verified immediately when removing OTP flow
         const owner = new ShopOwner({
             shopName,
             ownerName,
@@ -96,27 +92,24 @@ exports.register = async (req, res) => {
             latitude,
             longitude,
             balance: 0,
-            isEmailVerified: false,
-            otp,
-            otpExpiry
+            isEmailVerified: true // immediately verified
         });
 
         await owner.save();
-        console.log('✓ New shop registered (pending verification):', shopName);
+        console.log('✓ New shop registered:', shopName);
 
-        // Send OTP email in background (non-blocking)
-        sendOTPEmail(email, otp, shopName)
-            .then(() => console.log('✓ OTP sent to:', email))
-            .catch(err => console.error('✗ Failed to send OTP email:', err.message));
+        // Issue JWT token so frontend can log user in directly
+        const token = signToken(owner);
 
         res.status(201).json({
             success: true,
-            message: 'Shop registered. Please verify your email.',
-            requiresVerification: true,
+            message: 'Shop registered successfully.',
+            token,
             owner: {
                 _id: owner._id,
                 shopName: owner.shopName,
-                email: owner.email
+                email: owner.email,
+                mobile: owner.mobile
             }
         });
     } catch (e) {
@@ -162,30 +155,16 @@ exports.verifyCredentials = async (req, res) => {
             });
         }
 
-        // Generate OTP for every login
-        const otp = generateOTP();
-        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        owner.otp = otp;
-        owner.otpExpiry = otpExpiry;
-        await owner.save();
-
-        console.log('🔐 OTP generated for login:', owner.shopName);
-
-        // Send OTP email in background (non-blocking)
-        sendOTPEmail(owner.email, otp, owner.shopName)
-            .then(() => console.log('✓ OTP sent to:', owner.email))
-            .catch(err => console.error('✗ Failed to send OTP email:', err.message));
-
-        // Return OTP required response
-        return res.status(403).json({
-            success: false,
-            message: 'OTP sent to your email. Please verify to complete login.',
-            requiresVerification: true,
+        // Password is valid – skip OTP entirely and issue token
+        const token = signToken(owner);
+        return res.status(200).json({
+            success: true,
+            token,
             owner: {
                 _id: owner._id,
                 shopName: owner.shopName,
-                email: owner.email
+                email: owner.email,
+                mobile: owner.mobile
             }
         });
     } catch (e) {
@@ -299,66 +278,7 @@ exports.logout = async (req, res) => {
     }
 };
 
-// Verify OTP
-exports.verifyOTP = async (req, res) => {
-    try {
-        const { ownerId, otp } = req.body;
 
-        if (!ownerId || !otp) {
-            return res.status(400).json({
-                success: false,
-                message: 'Owner ID and OTP are required'
-            });
-        }
-
-        const owner = await ShopOwner.findById(ownerId);
-
-        if (!owner) {
-            return res.status(404).json({
-                success: false,
-                message: 'Shop not found'
-            });
-        }
-
-        // Check if OTP matches
-        if (owner.otp !== otp) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid OTP'
-            });
-        }
-
-        // Check if OTP expired
-        if (new Date() > owner.otpExpiry) {
-            return res.status(400).json({
-                success: false,
-                message: 'OTP has expired. Please request a new one.'
-            });
-        }
-
-        // Clear OTP (will be regenerated on next login)
-        owner.otp = undefined;
-        owner.otpExpiry = undefined;
-        await owner.save();
-
-        console.log('✅ OTP verified for login:', owner.shopName);
-
-        // Generate token
-        const token = signToken(owner);
-
-        // Store user session
-        req.session.userId = owner._id;
-        req.session.userType = 'shop';
-        req.session.shopName = owner.shopName;
-
-        res.json({
-            success: true,
-            message: 'OTP verified successfully. Login complete.',
-            token,
-            owner: {
-                _id: owner._id,
-                shopName: owner.shopName,
-                ownerName: owner.ownerName,
                 mobile: owner.mobile,
                 email: owner.email,
                 businessType: owner.businessType,
@@ -455,25 +375,10 @@ exports.forgotPasswordVerify = async (req, res) => {
             });
         }
 
-        // Generate OTP
-        const otp = generateOTP();
-        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        // Save OTP to database
-        owner.otp = otp;
-        owner.otpExpiry = otpExpiry;
-        await owner.save();
-
-        // Send OTP email (non-blocking)
-        sendOTPEmail(email, otp, owner.shopName)
-            .then(() => console.log('✓ Forgot password OTP sent to:', email))
-            .catch(err => console.error('✗ Failed to send forgot password OTP:', err.message));
-
-        console.log('🔐 Forgot password OTP generated for:', owner.shopName);
-
+        // no OTP required; directly proceed to password reset
         res.json({
             success: true,
-            message: 'OTP sent to your email',
+            message: 'Verification successful. You may now reset your password.',
             ownerId: owner._id,
             shopName: owner.shopName
         });
@@ -491,53 +396,7 @@ exports.forgotPasswordVerify = async (req, res) => {
  * Resend OTP for forgot password flow
  * POST /api/auth/forgot-password/resend-otp
  */
-exports.forgotPasswordResendOTP = async (req, res) => {
-    try {
-        const { ownerId } = req.body;
 
-        if (!ownerId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Owner ID is required'
-            });
-        }
-
-        const owner = await ShopOwner.findById(ownerId);
-
-        if (!owner) {
-            return res.status(404).json({
-                success: false,
-                message: 'Shop not found'
-            });
-        }
-
-        // Generate new OTP
-        const otp = generateOTP();
-        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        owner.otp = otp;
-        owner.otpExpiry = otpExpiry;
-        await owner.save();
-
-        // Send OTP email (non-blocking)
-        if (owner.email) {
-            sendOTPEmail(owner.email, otp, owner.shopName)
-                .then(() => console.log('✓ Forgot password OTP resent to:', owner.email))
-                .catch(err => console.error('✗ Failed to resend OTP:', err.message));
-        }
-
-        res.json({
-            success: true,
-            message: 'OTP sent successfully to your email'
-        });
-    } catch (error) {
-        console.error('Forgot password resend OTP error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error while resending OTP'
-        });
-    }
-};
 
 /**
  * Change shop password
